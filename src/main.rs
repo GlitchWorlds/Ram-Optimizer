@@ -1,4 +1,5 @@
-﻿use std::env;
+﻿mod gui;
+use std::env;
 use std::io::{self, Write};
 use std::mem::size_of;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -414,7 +415,7 @@ fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() == 1 {
-        run_interactive_mode();
+        gui::run_gui();
         return;
     }
 

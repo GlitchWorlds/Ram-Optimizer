@@ -12,16 +12,22 @@
 
 ## ✨ Features
 
+- **Native Win32 GUI Interface**:
+  - Zero-overhead pure Win32 API window (~440x490 fixed).
+  - Real-time Visual Memory Meter (`msctls_progress32`) and memory stats (Total, Used, Free in GB/MB).
+  - Prominent one-click "⚡ Optimize RAM Now" action button.
+  - Background automation controls: auto-optimize every N minutes or when memory load exceeds N%.
+  - Full System Tray support (`Shell_NotifyIconW`): minimize or close to tray, restore on double-click, and quick context menu.
 - **Process Working Set Trimming**: Enumerates active process handles and calls `EmptyWorkingSet` to flush idle physical pages to the pagefile or drop unreferenced working sets.
 - **Standby List & System Cache Purging**: Communicates directly with the Windows NT kernel through `NtSetSystemInformation` (`SystemMemoryListInformation` class 80) to purge the standby list (`SystemPurgeStandbyList = 3`) and flush system working sets (`SystemEmptyWorkingSetList = 2`).
 - **Token Privilege Escalation**: Automatically requests and enables `SeDebugPrivilege`, `SeIncreaseQuotaPrivilege`, and `SeProfileSingleProcessPrivilege` on token creation.
-- **Real-Time Memory Metrics**: Reads live physical RAM usage and workload percentages directly via `GlobalMemoryStatusEx`.
-- **Multiple Execution Modes**:
-  - `--once` : Instant one-shot optimization with before/after memory diff.
-  - `--interval <mins>` : Periodic background optimization daemon.
-  - `--threshold <pct>` : Intelligent trigger mode that cleans RAM only when memory pressure reaches a threshold percentage.
-  - **Interactive Console UI** : Live status dashboard with instant action shortcuts when launched without arguments.
-- **Portable & Tiny Footprint**: Compiles to a single, statically linked `.exe` under 2 MB with runtime memory usage below 5 MB.
+- **Dual-Mode Execution Architecture**:
+  - **No Arguments**: Automatically launches the modern Native Win32 GUI with real-time stats and tray support.
+  - **CLI Flags**: Seamlessly executes in headless/terminal mode for scripts and automation.
+    - `--once` : Instant one-shot optimization with before/after memory diff.
+    - `--interval <mins>` : Periodic background optimization daemon.
+    - `--threshold <pct>` : Intelligent trigger mode that cleans RAM only when memory pressure reaches a threshold percentage.
+- **Portable & Tiny Footprint**: Compiles to a single, statically linked `.exe` (~320 KB) with runtime memory usage below 5-10 MB.
 
 ---
 
@@ -29,10 +35,10 @@
 
 | Metric | Ram-Optimizer (Rust) | C# / .NET Based Cleaners | C++ Alternatives |
 | :--- | :---: | :---: | :---: |
-| **Runtime Footprint** | **~3 - 5 MB RAM** | 40 - 120 MB RAM | 8 - 15 MB RAM |
+| **Runtime Footprint** | **~5 - 12 MB RAM** | 40 - 120 MB RAM | 8 - 15 MB RAM |
 | **Runtime Dependency** | **None (Native Machine Code)** | .NET Runtime / CLR | MSVC Redistributable |
 | **Garbage Collector** | **Zero (Deterministic RAII)** | GC Pauses | None |
-| **Binary Size** | **~1.5 MB** | 15 - 50 MB+ | ~2 - 5 MB |
+| **Binary Size** | **~320 KB** | 15 - 50 MB+ | ~2 - 5 MB |
 | **Kernel FFI Calls** | **Direct `ntdll` / `psapi`** | P/Invoke overhead | Win32 / NT API |
 
 ---
@@ -60,28 +66,29 @@ cargo build --release
 
 ## 📖 Usage & Examples
 
-### 1. One-Shot Clean
+### 1. Graphical User Interface (GUI Mode)
+Launch the application without any command-line arguments:
+```powershell
+.\ram-optimizer.exe
+```
+This opens the native Win32 window with real-time memory meters, one-click optimization, background automation timers, and system tray minimization.
+
+### 2. One-Shot Clean (CLI)
 Clean all processes and standby lists immediately, view the freed memory, and exit:
 ```powershell
 .\ram-optimizer.exe --once
 ```
 
-### 2. Auto-Clean on Interval (Daemon)
+### 3. Auto-Clean on Interval (Daemon)
 Clean memory automatically every 15 minutes:
 ```powershell
 .\ram-optimizer.exe --interval 15
 ```
 
-### 3. Threshold-Based Auto-Clean
+### 4. Threshold-Based Auto-Clean
 Watch memory load and automatically trigger optimization whenever usage exceeds 80%:
 ```powershell
 .\ram-optimizer.exe --threshold 80 --interval 2
-```
-
-### 4. Interactive Console Mode
-Simply run the executable without flags:
-```powershell
-.\ram-optimizer.exe
 ```
 
 ---
