@@ -4,19 +4,23 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use windows_sys::Win32::Foundation::{
-    BOOL, HWND, LPARAM, LRESULT, POINT, WPARAM,
+    BOOL, HMODULE, HWND, LPARAM, LRESULT, POINT, WPARAM,
 };
 use windows_sys::Win32::Graphics::Gdi::{
     CreateFontW, CreateSolidBrush, DeleteObject, GetStockObject, SetBkMode,
     SetTextColor, FW_BOLD, FW_NORMAL, HBRUSH, HDC, HFONT, TRANSPARENT,
 };
-use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::System::LibraryLoader::{GetModuleFileNameW, GetModuleHandleW};
+use windows_sys::Win32::System::Registry::{
+    RegCloseKey, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
+    HKEY_CURRENT_USER, KEY_READ, KEY_WRITE, REG_SZ, HKEY,
+};
 use windows_sys::Win32::UI::Controls::{
     InitCommonControlsEx, INITCOMMONCONTROLSEX, ICC_PROGRESS_CLASS, PBM_SETPOS, PBM_SETRANGE32,
     PROGRESS_CLASSW,
 };
 use windows_sys::Win32::UI::Shell::{
-    Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE,
+    Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY,
     NOTIFYICONDATAW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -24,7 +28,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     DestroyWindow, DispatchMessageW, GetCursorPos, GetMessageW, GetSystemMetrics,
     GetWindowLongPtrW, KillTimer, LoadCursorW, LoadIconW, PostQuitMessage,
     RegisterClassExW, SendMessageW, SetForegroundWindow, SetTimer, SetWindowLongPtrW,
-    ShowWindow, TrackPopupMenu, TranslateMessage, BM_GETCHECK,
+    ShowWindow, TrackPopupMenu, TranslateMessage, BM_GETCHECK, BM_SETCHECK,
     CS_HREDRAW, CS_VREDRAW, GWLP_USERDATA, HMENU, IDC_ARROW, IDI_APPLICATION,
     MF_SEPARATOR, MF_STRING, MSG, SM_CXSCREEN, SM_CYSCREEN, SW_HIDE, SW_RESTORE,
     SW_SHOW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RIGHTBUTTON, WM_CLOSE, WM_COMMAND,
@@ -40,7 +44,8 @@ use crate::{get_ram_metrics, optimize_memory};
 const ID_TIMER_TICK: usize = 1001;
 const WM_TRAYICON: u32 = WM_USER + 201;
 
-const BST_CHECKED: isize = 1;
+const BST_UNCHECKED: usize = 0;
+const BST_CHECKED: usize = 1;
 
 const IDC_METER_PROGRESS: i32 = 2001;
 const IDC_BTN_OPTIMIZE: i32 = 2002;
@@ -48,7 +53,8 @@ const IDC_CHK_INTERVAL: i32 = 2003;
 const IDC_EDIT_INTERVAL: i32 = 2004;
 const IDC_CHK_THRESHOLD: i32 = 2005;
 const IDC_EDIT_THRESHOLD: i32 = 2006;
-const IDC_LBL_STATUS: i32 = 2007;
+const IDC_CHK_STARTUP: i32 = 2007;
+const IDC_LBL_STATUS: i32 = 2008;
 
 const IDM_TRAY_OPEN: usize = 3001;
 const IDM_TRAY_OPTIMIZE: usize = 3002;
@@ -59,6 +65,73 @@ static LAST_OPTIMIZE_SEC: AtomicU64 = AtomicU64::new(0);
 
 fn to_wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
+}
+
+pub fn is_startup_enabled() -> bool {
+    unsafe {
+        let subkey = to_wide("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
+        let val_name = to_wide("RamOptimizer");
+        let mut hkey: HKEY = ptr::null_mut();
+
+        if RegOpenKeyExW(HKEY_CURRENT_USER, subkey.as_ptr(), 0, KEY_READ, &mut hkey) != 0 {
+            return false;
+        }
+
+        let mut val_type = 0u32;
+        let mut data_len = 0u32;
+        let res = RegQueryValueExW(
+            hkey,
+            val_name.as_ptr(),
+            ptr::null_mut(),
+            &mut val_type,
+            ptr::null_mut(),
+            &mut data_len,
+        );
+
+        RegCloseKey(hkey);
+        res == 0
+    }
+}
+
+pub fn set_startup_enabled(enabled: bool) -> bool {
+    unsafe {
+        let subkey = to_wide("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
+        let val_name = to_wide("RamOptimizer");
+        let mut hkey: HKEY = ptr::null_mut();
+
+        if RegOpenKeyExW(HKEY_CURRENT_USER, subkey.as_ptr(), 0, KEY_WRITE | KEY_READ, &mut hkey) != 0 {
+            return false;
+        }
+
+        let success = if enabled {
+            let mut exe_path = vec![0u16; 1024];
+            let len = GetModuleFileNameW(ptr::null_mut() as HMODULE, exe_path.as_mut_ptr(), exe_path.len() as u32);
+            if len == 0 {
+                RegCloseKey(hkey);
+                return false;
+            }
+            exe_path.truncate(len as usize);
+            let path_str = String::from_utf16_lossy(&exe_path);
+            let formatted_cmd = format!("\"{}\" --minimized", path_str);
+            let wide_cmd = to_wide(&formatted_cmd);
+
+            let res = RegSetValueExW(
+                hkey,
+                val_name.as_ptr(),
+                0,
+                REG_SZ,
+                wide_cmd.as_ptr() as *const u8,
+                (wide_cmd.len() * 2) as u32,
+            );
+            res == 0
+        } else {
+            let res = RegDeleteValueW(hkey, val_name.as_ptr());
+            res == 0 || res == 2 // ERROR_FILE_NOT_FOUND is 2, considered success when disabling
+        };
+
+        RegCloseKey(hkey);
+        success
+    }
 }
 
 struct GuiControls {
@@ -72,6 +145,7 @@ struct GuiControls {
     h_edit_interval: HWND,
     h_chk_threshold: HWND,
     h_edit_threshold: HWND,
+    h_chk_startup: HWND,
     font_title: HFONT,
     font_bold: HFONT,
     font_normal: HFONT,
@@ -89,7 +163,7 @@ impl GuiControls {
     }
 }
 
-pub fn run_gui() {
+pub fn run_gui(start_minimized: bool) {
     unsafe {
         let icc = INITCOMMONCONTROLSEX {
             dwSize: size_of::<INITCOMMONCONTROLSEX>() as u32,
@@ -113,18 +187,19 @@ pub fn run_gui() {
         RegisterClassExW(&wnd_class);
 
         let win_width = 440;
-        let win_height = 490;
+        let win_height = 520;
         let screen_w = GetSystemMetrics(SM_CXSCREEN);
         let screen_h = GetSystemMetrics(SM_CYSCREEN);
         let pos_x = (screen_w - win_width) / 2;
         let pos_y = (screen_h - win_height) / 2;
 
-        let title = to_wide("Ram Optimizer v1.1.1");
+        let title = to_wide("Ram Optimizer v1.2.0");
+        let initial_visibility = if start_minimized { 0 } else { WS_VISIBLE };
         let hwnd = CreateWindowExW(
             WS_EX_APPWINDOW,
             class_name.as_ptr(),
             title.as_ptr(),
-            WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_VISIBLE,
+            WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | initial_visibility,
             pos_x,
             pos_y,
             win_width,
@@ -142,6 +217,10 @@ pub fn run_gui() {
         add_tray_icon(hwnd);
         SetTimer(hwnd, ID_TIMER_TICK, 1000, None);
         update_gui_metrics(hwnd);
+
+        if start_minimized {
+            ShowWindow(hwnd, SW_HIDE);
+        }
 
         let mut msg: MSG = std::mem::zeroed();
         while GetMessageW(&mut msg, ptr::null_mut(), 0, 0) > 0 {
@@ -162,12 +241,27 @@ unsafe fn add_tray_icon(hwnd: HWND) {
     nid.uCallbackMessage = WM_TRAYICON;
     nid.hIcon = LoadIconW(ptr::null_mut(), IDI_APPLICATION);
 
-    let tip = to_wide("Ram Optimizer v1.1.1");
+    let tip = to_wide("Ram Optimizer v1.2.0");
     for (i, &c) in tip.iter().take(nid.szTip.len() - 1).enumerate() {
         nid.szTip[i] = c;
     }
 
     Shell_NotifyIconW(NIM_ADD, &nid);
+}
+
+unsafe fn update_tray_tooltip(hwnd: HWND, pct: u32) {
+    let mut nid: NOTIFYICONDATAW = std::mem::zeroed();
+    nid.cbSize = size_of::<NOTIFYICONDATAW>() as u32;
+    nid.hWnd = hwnd;
+    nid.uID = 1;
+    nid.uFlags = NIF_TIP;
+
+    let tip = to_wide(&format!("Ram Optimizer v1.2.0 - Load: {}%", pct));
+    for (i, &c) in tip.iter().take(nid.szTip.len() - 1).enumerate() {
+        nid.szTip[i] = c;
+    }
+
+    Shell_NotifyIconW(NIM_MODIFY, &nid);
 }
 
 unsafe fn remove_tray_icon(hwnd: HWND) {
@@ -206,6 +300,8 @@ unsafe fn update_gui_metrics(hwnd: HWND) {
             m.memory_load_pct as usize,
             0,
         );
+
+        update_tray_tooltip(hwnd, m.memory_load_pct);
     }
 }
 
@@ -257,7 +353,7 @@ unsafe fn check_automation(hwnd: HWND) {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
 
     let chk_interval = SendMessageW(controls.h_chk_interval, BM_GETCHECK, 0, 0);
-    if chk_interval == BST_CHECKED {
+    if chk_interval as usize == BST_CHECKED {
         let mut text_buf = [0u16; 32];
         GetWindowTextW(controls.h_edit_interval, text_buf.as_mut_ptr(), 32);
         let mins_str = String::from_utf16_lossy(&text_buf);
@@ -274,7 +370,7 @@ unsafe fn check_automation(hwnd: HWND) {
     }
 
     let chk_threshold = SendMessageW(controls.h_chk_threshold, BM_GETCHECK, 0, 0);
-    if chk_threshold == BST_CHECKED {
+    if chk_threshold as usize == BST_CHECKED {
         let mut text_buf = [0u16; 32];
         GetWindowTextW(controls.h_edit_threshold, text_buf.as_mut_ptr(), 32);
         let thresh_str = String::from_utf16_lossy(&text_buf);
@@ -428,9 +524,9 @@ unsafe extern "system" fn window_proc(
             let h_grp_auto = CreateWindowExW(
                 0,
                 button_class.as_ptr(),
-                to_wide(" Background Automation ").as_ptr(),
+                to_wide(" Background Automation & Startup ").as_ptr(),
                 WS_CHILD | WS_VISIBLE | 0x00000007,
-                20, 230, 385, 145,
+                20, 230, 385, 180,
                 hwnd,
                 ptr::null_mut(),
                 h_inst,
@@ -482,7 +578,7 @@ unsafe extern "system" fn window_proc(
                 button_class.as_ptr(),
                 to_wide("Auto-optimize when RAM load >").as_ptr(),
                 WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX as u32,
-                35, 300, 195, 24,
+                35, 295, 195, 24,
                 hwnd,
                 IDC_CHK_THRESHOLD as HMENU,
                 h_inst,
@@ -495,7 +591,7 @@ unsafe extern "system" fn window_proc(
                 edit_class.as_ptr(),
                 to_wide("80").as_ptr(),
                 WS_CHILD | WS_VISIBLE | ES_NUMBER as u32 | ES_AUTOHSCROLL as u32,
-                235, 300, 45, 24,
+                235, 295, 45, 24,
                 hwnd,
                 IDC_EDIT_THRESHOLD as HMENU,
                 h_inst,
@@ -508,7 +604,7 @@ unsafe extern "system" fn window_proc(
                 static_class.as_ptr(),
                 to_wide("%").as_ptr(),
                 WS_CHILD | WS_VISIBLE,
-                287, 303, 30, 20,
+                287, 298, 30, 20,
                 hwnd,
                 ptr::null_mut(),
                 h_inst,
@@ -516,12 +612,30 @@ unsafe extern "system" fn window_proc(
             );
             SendMessageW(h_lbl_pct_sign, 0x0030, font_normal as usize, 1);
 
+            let h_chk_startup = CreateWindowExW(
+                0,
+                button_class.as_ptr(),
+                to_wide("Start with Windows (Run minimized in System Tray)").as_ptr(),
+                WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX as u32,
+                35, 335, 350, 24,
+                hwnd,
+                IDC_CHK_STARTUP as HMENU,
+                h_inst,
+                ptr::null_mut(),
+            );
+            SendMessageW(h_chk_startup, 0x0030, font_normal as usize, 1);
+
+            // Check current registry startup status and set checkbox state
+            let initial_startup = is_startup_enabled();
+            let check_flag = if initial_startup { BST_CHECKED } else { BST_UNCHECKED };
+            SendMessageW(h_chk_startup, BM_SETCHECK, check_flag, 0);
+
             let h_lbl_tip = CreateWindowExW(
                 0,
                 static_class.as_ptr(),
                 to_wide("Tip: Minimizing window hides it to System Tray.").as_ptr(),
                 WS_CHILD | WS_VISIBLE,
-                35, 340, 350, 20,
+                35, 375, 350, 20,
                 hwnd,
                 ptr::null_mut(),
                 h_inst,
@@ -534,7 +648,7 @@ unsafe extern "system" fn window_proc(
                 static_class.as_ptr(),
                 to_wide("GlitchWorlds • Native Rust Win32/NT FFI • Zero Overhead").as_ptr(),
                 WS_CHILD | WS_VISIBLE,
-                20, 390, 385, 20,
+                20, 425, 385, 20,
                 hwnd,
                 ptr::null_mut(),
                 h_inst,
@@ -553,6 +667,7 @@ unsafe extern "system" fn window_proc(
                 h_edit_interval,
                 h_chk_threshold,
                 h_edit_threshold,
+                h_chk_startup,
                 font_title,
                 font_bold,
                 font_normal,
@@ -580,6 +695,27 @@ unsafe extern "system" fn window_proc(
             let id = (wparam & 0xFFFF) as i32;
             if id == IDC_BTN_OPTIMIZE {
                 trigger_gui_optimize(hwnd);
+            } else if id == IDC_CHK_STARTUP {
+                let state_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut GuiControls;
+                if !state_ptr.is_null() {
+                    let controls = &*state_ptr;
+                    let is_checked = SendMessageW(controls.h_chk_startup, BM_GETCHECK, 0, 0) as usize == BST_CHECKED;
+                    if set_startup_enabled(is_checked) {
+                        let status_msg = if is_checked {
+                            "Auto-run on Windows startup enabled."
+                        } else {
+                            "Auto-run on Windows startup disabled."
+                        };
+                        let wide_msg = to_wide(status_msg);
+                        SetWindowTextW(controls.h_lbl_status, wide_msg.as_ptr());
+                    } else {
+                        // Revert checkbox state on failure
+                        let reverted = if is_checked { BST_UNCHECKED } else { BST_CHECKED };
+                        SendMessageW(controls.h_chk_startup, BM_SETCHECK, reverted, 0);
+                        let status_msg = to_wide("Failed to update Windows startup registry key.");
+                        SetWindowTextW(controls.h_lbl_status, status_msg.as_ptr());
+                    }
+                }
             }
             0
         }

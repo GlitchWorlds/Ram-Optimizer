@@ -1,6 +1,6 @@
-[package]
+﻿[package]
 name = "ram-optimizer"
-version = "1.1.1"
+version = "1.2.0"
 edition = "2021"
 authors = ["GlitchWorlds"]
 description = "High-performance ultra-lightweight Windows RAM Optimizer written in native Rust with Win32/NT FFI"
@@ -20,7 +20,9 @@ windows-sys = { version = "0.59.0", features = [
     "Win32_UI_Controls",
     "Win32_UI_Shell",
     "Win32_System_LibraryLoader",
-    "Win32_System_Console"] }
+    "Win32_System_Console",
+    "Win32_System_Registry",
+] }
 
 [profile.release]
 opt-level = 3

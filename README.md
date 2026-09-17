@@ -13,21 +13,23 @@
 ## ✨ Features
 
 - **Native Win32 GUI Interface**:
-  - Zero-overhead pure Win32 API window (~440x490 fixed).
+  - Zero-overhead pure Win32 API window (~440x520 fixed).
   - Real-time Visual Memory Meter (`msctls_progress32`) and memory stats (Total, Used, Free in GB/MB).
   - Prominent one-click "⚡ Optimize RAM Now" action button.
   - Background automation controls: auto-optimize every N minutes or when memory load exceeds N%.
-  - Full System Tray support (`Shell_NotifyIconW`): minimize or close to tray, restore on double-click, and quick context menu.
+  - **Start with Windows Auto-Run**: Native registry integration (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`) with UI checkbox to seamlessly start on system login.
+  - **System Tray Support & Background Launch**: Launch minimized directly to System Tray (`--minimized` / `--tray`), real-time RAM usage percentage tooltip, restore on double-click, and quick context menu.
 - **Process Working Set Trimming**: Enumerates active process handles and calls `EmptyWorkingSet` to flush idle physical pages to the pagefile or drop unreferenced working sets.
 - **Standby List & System Cache Purging**: Communicates directly with the Windows NT kernel through `NtSetSystemInformation` (`SystemMemoryListInformation` class 80) to purge the standby list (`SystemPurgeStandbyList = 3`) and flush system working sets (`SystemEmptyWorkingSetList = 2`).
 - **Token Privilege Escalation**: Automatically requests and enables `SeDebugPrivilege`, `SeIncreaseQuotaPrivilege`, and `SeProfileSingleProcessPrivilege` on token creation.
 - **Dual-Mode Execution Architecture**:
-  - **No Arguments**: Automatically launches the modern Native Win32 GUI with real-time stats and tray support.
+  - **No Arguments**: Automatically launches the modern Native Win32 GUI with real-time stats, automation controls, and tray support.
+  - **Background / Tray Launch**: `--minimized` or `--tray` runs the GUI silently in the system notification area without displaying the main window.
   - **CLI Flags**: Seamlessly executes in headless/terminal mode for scripts and automation.
     - `--once` : Instant one-shot optimization with before/after memory diff.
     - `--interval <mins>` : Periodic background optimization daemon.
     - `--threshold <pct>` : Intelligent trigger mode that cleans RAM only when memory pressure reaches a threshold percentage.
-- **Portable & Tiny Footprint**: Compiles to a single, statically linked `.exe` (~320 KB) with runtime memory usage below 5-10 MB.
+- **Portable & Tiny Footprint**: Compiles to a single, statically linked `.exe` (~340 KB) with runtime memory usage below 5-10 MB.
 
 ---
 
@@ -38,7 +40,7 @@
 | **Runtime Footprint** | **~5 - 12 MB RAM** | 40 - 120 MB RAM | 8 - 15 MB RAM |
 | **Runtime Dependency** | **None (Native Machine Code)** | .NET Runtime / CLR | MSVC Redistributable |
 | **Garbage Collector** | **Zero (Deterministic RAII)** | GC Pauses | None |
-| **Binary Size** | **~320 KB** | 15 - 50 MB+ | ~2 - 5 MB |
+| **Binary Size** | **~340 KB** | 15 - 50 MB+ | ~2 - 5 MB |
 | **Kernel FFI Calls** | **Direct `ntdll` / `psapi`** | P/Invoke overhead | Win32 / NT API |
 
 ---
@@ -71,21 +73,27 @@ Launch the application without any command-line arguments:
 ```powershell
 .\ram-optimizer.exe
 ```
-This opens the native Win32 window with real-time memory meters, one-click optimization, background automation timers, and system tray minimization.
+This opens the native Win32 window with real-time memory meters, one-click optimization, background automation timers, "Start with Windows" checkbox, and system tray minimization.
 
-### 2. One-Shot Clean (CLI)
+### 2. Launch Directly to System Tray
+Start Ram-Optimizer hidden in the notification area:
+```powershell
+.\ram-optimizer.exe --minimized
+```
+
+### 3. One-Shot Clean (CLI)
 Clean all processes and standby lists immediately, view the freed memory, and exit:
 ```powershell
 .\ram-optimizer.exe --once
 ```
 
-### 3. Auto-Clean on Interval (Daemon)
+### 4. Auto-Clean on Interval (Daemon)
 Clean memory automatically every 15 minutes:
 ```powershell
 .\ram-optimizer.exe --interval 15
 ```
 
-### 4. Threshold-Based Auto-Clean
+### 5. Threshold-Based Auto-Clean
 Watch memory load and automatically trigger optimization whenever usage exceeds 80%:
 ```powershell
 .\ram-optimizer.exe --threshold 80 --interval 2

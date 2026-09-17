@@ -1,4 +1,4 @@
-#![windows_subsystem = "windows"]
+﻿#![windows_subsystem = "windows"]
 
 mod gui;
 use std::env;
@@ -271,12 +271,15 @@ fn print_help() {
     println!("  ram-optimizer [FLAGS]");
     println!();
     println!("Flags:");
+    println!("  --minimized, --tray     Start GUI minimized directly to System Tray");
     println!("  --once                  Clean RAM immediately once, display freed memory, and exit");
     println!("  --interval <minutes>    Continuously optimize RAM every N minutes");
     println!("  --threshold <percent>   Auto-clean memory whenever load exceeds N%");
     println!("  --help, -h              Display this help information");
     println!();
     println!("Examples:");
+    println!("  ram-optimizer");
+    println!("  ram-optimizer --minimized");
     println!("  ram-optimizer --once");
     println!("  ram-optimizer --interval 15");
     println!("  ram-optimizer --threshold 80 --interval 5");
@@ -421,14 +424,11 @@ fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() == 1 {
-        gui::run_gui();
+        gui::run_gui(false);
         return;
     }
 
-    unsafe {
-        attach_parent_console();
-    }
-
+    let mut start_minimized = false;
     let mut once = false;
     let mut interval: Option<u64> = None;
     let mut threshold: Option<u32> = None;
@@ -436,6 +436,9 @@ fn main() {
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
+            "--minimized" | "--tray" => {
+                start_minimized = true;
+            }
             "--once" => {
                 once = true;
             }
@@ -445,10 +448,12 @@ fn main() {
                         interval = Some(val);
                         i += 1;
                     } else {
+                        unsafe { attach_parent_console(); }
                         eprintln!("Error: --interval requires an integer (minutes).");
                         std::process::exit(1);
                     }
                 } else {
+                    unsafe { attach_parent_console(); }
                     eprintln!("Error: --interval requires a value.");
                     std::process::exit(1);
                 }
@@ -459,26 +464,39 @@ fn main() {
                         threshold = Some(val);
                         i += 1;
                     } else {
+                        unsafe { attach_parent_console(); }
                         eprintln!("Error: --threshold requires an integer percentage (1-100).");
                         std::process::exit(1);
                     }
                 } else {
+                    unsafe { attach_parent_console(); }
                     eprintln!("Error: --threshold requires a value.");
                     std::process::exit(1);
                 }
             }
             "--help" | "-h" => {
+                unsafe { attach_parent_console(); }
                 print_banner();
                 print_help();
                 return;
             }
             unknown => {
+                unsafe { attach_parent_console(); }
                 eprintln!("Unknown option: {}", unknown);
                 print_help();
                 std::process::exit(1);
             }
         }
         i += 1;
+    }
+
+    if start_minimized && !once && interval.is_none() && threshold.is_none() {
+        gui::run_gui(true);
+        return;
+    }
+
+    unsafe {
+        attach_parent_console();
     }
 
     if once {
