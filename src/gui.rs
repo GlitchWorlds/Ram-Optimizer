@@ -119,7 +119,7 @@ pub fn run_gui() {
         let pos_x = (screen_w - win_width) / 2;
         let pos_y = (screen_h - win_height) / 2;
 
-        let title = to_wide("Ram Optimizer v1.1.0");
+        let title = to_wide("Ram Optimizer v1.1.1");
         let hwnd = CreateWindowExW(
             WS_EX_APPWINDOW,
             class_name.as_ptr(),
@@ -162,7 +162,7 @@ unsafe fn add_tray_icon(hwnd: HWND) {
     nid.uCallbackMessage = WM_TRAYICON;
     nid.hIcon = LoadIconW(ptr::null_mut(), IDI_APPLICATION);
 
-    let tip = to_wide("Ram Optimizer v1.1.0");
+    let tip = to_wide("Ram Optimizer v1.1.1");
     for (i, &c) in tip.iter().take(nid.szTip.len() - 1).enumerate() {
         nid.szTip[i] = c;
     }

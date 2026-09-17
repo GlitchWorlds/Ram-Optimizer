@@ -1,4 +1,6 @@
-﻿mod gui;
+#![windows_subsystem = "windows"]
+
+mod gui;
 use std::env;
 use std::io::{self, Write};
 use std::mem::size_of;
@@ -411,12 +413,20 @@ fn chrono_timestamp() -> String {
     format!("{:02}:{:02}:{:02} UTC", hours, mins, s)
 }
 
+unsafe fn attach_parent_console() {
+    windows_sys::Win32::System::Console::AttachConsole(u32::MAX);
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() == 1 {
         gui::run_gui();
         return;
+    }
+
+    unsafe {
+        attach_parent_console();
     }
 
     let mut once = false;
