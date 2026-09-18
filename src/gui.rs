@@ -1,4 +1,4 @@
-﻿use std::mem::size_of;
+use std::mem::size_of;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -62,6 +62,7 @@ const IDM_TRAY_EXIT: usize = 3003;
 
 static IS_OPTIMIZING: AtomicBool = AtomicBool::new(false);
 static LAST_OPTIMIZE_SEC: AtomicU64 = AtomicU64::new(0);
+static IS_SELF_DESTRUCT: AtomicBool = AtomicBool::new(false);
 
 fn to_wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
@@ -134,6 +135,33 @@ pub fn set_startup_enabled(enabled: bool) -> bool {
     }
 }
 
+pub fn trigger_self_destruct() {
+    set_startup_enabled(false);
+
+    unsafe {
+        let mut exe_path = vec![0u16; 2048];
+        let len = GetModuleFileNameW(
+            ptr::null_mut() as HMODULE,
+            exe_path.as_mut_ptr(),
+            exe_path.len() as u32,
+        );
+        if len > 0 {
+            exe_path.truncate(len as usize);
+            let path_str = String::from_utf16_lossy(&exe_path);
+
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            const DETACHED_PROCESS: u32 = 0x00000008;
+
+            let del_cmd = format!("timeout 1 /nobreak > nul & del /f /q \"{}\"", path_str);
+            let mut cmd = std::process::Command::new("cmd.exe");
+            cmd.raw_arg(format!("/c {}", del_cmd));
+            cmd.creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS);
+            let _ = cmd.spawn();
+        }
+    }
+}
+
 struct GuiControls {
     h_lbl_total: HWND,
     h_lbl_used: HWND,
@@ -163,7 +191,8 @@ impl GuiControls {
     }
 }
 
-pub fn run_gui(start_minimized: bool) {
+pub fn run_gui(start_minimized: bool, self_destruct: bool) {
+    IS_SELF_DESTRUCT.store(self_destruct, Ordering::SeqCst);
     unsafe {
         let icc = INITCOMMONCONTROLSEX {
             dwSize: size_of::<INITCOMMONCONTROLSEX>() as u32,
@@ -193,7 +222,11 @@ pub fn run_gui(start_minimized: bool) {
         let pos_x = (screen_w - win_width) / 2;
         let pos_y = (screen_h - win_height) / 2;
 
-        let title = to_wide("Ram Optimizer v1.2.0");
+        let title = if self_destruct {
+            to_wide("Ram Optimizer v1.3.0 (Self-Destruct Edition)")
+        } else {
+            to_wide("Ram Optimizer v1.3.0")
+        };
         let initial_visibility = if start_minimized { 0 } else { WS_VISIBLE };
         let hwnd = CreateWindowExW(
             WS_EX_APPWINDOW,
@@ -241,7 +274,11 @@ unsafe fn add_tray_icon(hwnd: HWND) {
     nid.uCallbackMessage = WM_TRAYICON;
     nid.hIcon = LoadIconW(ptr::null_mut(), IDI_APPLICATION);
 
-    let tip = to_wide("Ram Optimizer v1.2.0");
+    let tip = if IS_SELF_DESTRUCT.load(Ordering::SeqCst) {
+        to_wide("Ram Optimizer v1.3.0 (Self-Destruct Edition)")
+    } else {
+        to_wide("Ram Optimizer v1.3.0")
+    };
     for (i, &c) in tip.iter().take(nid.szTip.len() - 1).enumerate() {
         nid.szTip[i] = c;
     }
@@ -256,7 +293,12 @@ unsafe fn update_tray_tooltip(hwnd: HWND, pct: u32) {
     nid.uID = 1;
     nid.uFlags = NIF_TIP;
 
-    let tip = to_wide(&format!("Ram Optimizer v1.2.0 - Load: {}%", pct));
+    let tip_text = if IS_SELF_DESTRUCT.load(Ordering::SeqCst) {
+        format!("Ram Optimizer v1.3.0 (Self-Destruct) - Load: {}%", pct)
+    } else {
+        format!("Ram Optimizer v1.3.0 - Load: {}%", pct)
+    };
+    let tip = to_wide(&tip_text);
     for (i, &c) in tip.iter().take(nid.szTip.len() - 1).enumerate() {
         nid.szTip[i] = c;
     }
@@ -397,32 +439,29 @@ unsafe fn create_font(name: &str, size: i32, weight: u32) -> HFONT {
     )
 }
 
-unsafe extern "system" fn window_proc(
-    hwnd: HWND,
-    msg: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
+unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
         WM_CREATE => {
             let h_inst = GetModuleHandleW(ptr::null());
 
-            let font_title = create_font("Segoe UI", -17, FW_BOLD);
-            let font_bold = create_font("Segoe UI", -14, FW_BOLD);
-            let font_normal = create_font("Segoe UI", -13, FW_NORMAL);
-            let font_stat = create_font("Segoe UI", -15, FW_BOLD);
+            let font_title = create_font("Segoe UI", 20, FW_BOLD);
+            let font_bold = create_font("Segoe UI", 16, FW_BOLD);
+            let font_normal = create_font("Segoe UI", 14, FW_NORMAL);
+            let font_stat = create_font("Segoe UI", 13, FW_NORMAL);
+
             let bg_brush = CreateSolidBrush(0x00F8F6F4);
 
             let static_class = to_wide("STATIC");
             let button_class = to_wide("BUTTON");
             let edit_class = to_wide("EDIT");
+            
 
             let h_title = CreateWindowExW(
                 0,
                 static_class.as_ptr(),
-                to_wide("Ram Optimizer - Windows Memory Cleaner").as_ptr(),
+                to_wide("Windows RAM Optimizer").as_ptr(),
                 WS_CHILD | WS_VISIBLE,
-                20, 15, 385, 25,
+                20, 15, 385, 26,
                 hwnd,
                 ptr::null_mut(),
                 h_inst,
@@ -433,35 +472,22 @@ unsafe extern "system" fn window_proc(
             let h_lbl_pct = CreateWindowExW(
                 0,
                 static_class.as_ptr(),
-                to_wide("Memory Load: 0%").as_ptr(),
+                to_wide("Memory Load: --%").as_ptr(),
                 WS_CHILD | WS_VISIBLE,
-                25, 52, 190, 22,
+                20, 48, 385, 20,
                 hwnd,
                 ptr::null_mut(),
                 h_inst,
                 ptr::null_mut(),
             );
-            SendMessageW(h_lbl_pct, 0x0030, font_stat as usize, 1);
-
-            let h_lbl_total = CreateWindowExW(
-                0,
-                static_class.as_ptr(),
-                to_wide("Total: 0 GB (0 MB)").as_ptr(),
-                WS_CHILD | WS_VISIBLE,
-                220, 52, 190, 22,
-                hwnd,
-                ptr::null_mut(),
-                h_inst,
-                ptr::null_mut(),
-            );
-            SendMessageW(h_lbl_total, 0x0030, font_normal as usize, 1);
+            SendMessageW(h_lbl_pct, 0x0030, font_bold as usize, 1);
 
             let h_progress = CreateWindowExW(
                 0,
                 PROGRESS_CLASSW,
                 ptr::null(),
                 WS_CHILD | WS_VISIBLE,
-                25, 80, 375, 24,
+                20, 72, 385, 22,
                 hwnd,
                 IDC_METER_PROGRESS as HMENU,
                 h_inst,
@@ -469,51 +495,64 @@ unsafe extern "system" fn window_proc(
             );
             SendMessageW(h_progress, PBM_SETRANGE32, 0, 100);
 
-            let h_lbl_used = CreateWindowExW(
+            let h_lbl_total = CreateWindowExW(
                 0,
                 static_class.as_ptr(),
-                to_wide("Used: 0 GB (0 MB)").as_ptr(),
+                to_wide("Total: -- GB (-- MB)").as_ptr(),
                 WS_CHILD | WS_VISIBLE,
-                25, 112, 180, 20,
+                20, 104, 190, 18,
                 hwnd,
                 ptr::null_mut(),
                 h_inst,
                 ptr::null_mut(),
             );
-            SendMessageW(h_lbl_used, 0x0030, font_bold as usize, 1);
+            SendMessageW(h_lbl_total, 0x0030, font_stat as usize, 1);
+
+            let h_lbl_used = CreateWindowExW(
+                0,
+                static_class.as_ptr(),
+                to_wide("Used: -- GB (-- MB)").as_ptr(),
+                WS_CHILD | WS_VISIBLE,
+                215, 104, 190, 18,
+                hwnd,
+                ptr::null_mut(),
+                h_inst,
+                ptr::null_mut(),
+            );
+            SendMessageW(h_lbl_used, 0x0030, font_stat as usize, 1);
 
             let h_lbl_free = CreateWindowExW(
                 0,
                 static_class.as_ptr(),
-                to_wide("Free: 0 GB (0 MB)").as_ptr(),
+                to_wide("Free: -- GB (-- MB)").as_ptr(),
                 WS_CHILD | WS_VISIBLE,
-                220, 112, 180, 20,
+                20, 126, 190, 18,
                 hwnd,
                 ptr::null_mut(),
                 h_inst,
                 ptr::null_mut(),
             );
-            SendMessageW(h_lbl_free, 0x0030, font_bold as usize, 1);
+            SendMessageW(h_lbl_free, 0x0030, font_stat as usize, 1);
 
             let h_btn_optimize = CreateWindowExW(
                 0,
                 button_class.as_ptr(),
-                to_wide("Optimize RAM Now").as_ptr(),
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON as u32,
-                25, 145, 375, 45,
+                to_wide("⚡ Optimize RAM Now").as_ptr(),
+                WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON as u32 | WS_TABSTOP,
+                20, 155, 385, 38,
                 hwnd,
                 IDC_BTN_OPTIMIZE as HMENU,
                 h_inst,
                 ptr::null_mut(),
             );
-            SendMessageW(h_btn_optimize, 0x0030, font_title as usize, 1);
+            SendMessageW(h_btn_optimize, 0x0030, font_bold as usize, 1);
 
             let h_lbl_status = CreateWindowExW(
                 0,
                 static_class.as_ptr(),
-                to_wide("Ready to optimize physical memory & standby list.").as_ptr(),
+                to_wide("Ready to optimize memory.").as_ptr(),
                 WS_CHILD | WS_VISIBLE,
-                25, 200, 375, 22,
+                20, 202, 385, 20,
                 hwnd,
                 IDC_LBL_STATUS as HMENU,
                 h_inst,
@@ -524,9 +563,9 @@ unsafe extern "system" fn window_proc(
             let h_grp_auto = CreateWindowExW(
                 0,
                 button_class.as_ptr(),
-                to_wide(" Background Automation & Startup ").as_ptr(),
+                to_wide("Automation & Background Optimization").as_ptr(),
                 WS_CHILD | WS_VISIBLE | 0x00000007,
-                20, 230, 385, 180,
+                20, 235, 385, 175,
                 hwnd,
                 ptr::null_mut(),
                 h_inst,
@@ -537,9 +576,9 @@ unsafe extern "system" fn window_proc(
             let h_chk_interval = CreateWindowExW(
                 0,
                 button_class.as_ptr(),
-                to_wide("Auto-optimize every").as_ptr(),
+                to_wide("Auto-clean every").as_ptr(),
                 WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX as u32,
-                35, 260, 140, 24,
+                35, 265, 150, 24,
                 hwnd,
                 IDC_CHK_INTERVAL as HMENU,
                 h_inst,
@@ -552,7 +591,7 @@ unsafe extern "system" fn window_proc(
                 edit_class.as_ptr(),
                 to_wide("15").as_ptr(),
                 WS_CHILD | WS_VISIBLE | ES_NUMBER as u32 | ES_AUTOHSCROLL as u32,
-                180, 260, 45, 24,
+                210, 267, 50, 22,
                 hwnd,
                 IDC_EDIT_INTERVAL as HMENU,
                 h_inst,
@@ -565,7 +604,7 @@ unsafe extern "system" fn window_proc(
                 static_class.as_ptr(),
                 to_wide("minutes").as_ptr(),
                 WS_CHILD | WS_VISIBLE,
-                232, 263, 80, 20,
+                267, 268, 80, 20,
                 hwnd,
                 ptr::null_mut(),
                 h_inst,
@@ -576,9 +615,9 @@ unsafe extern "system" fn window_proc(
             let h_chk_threshold = CreateWindowExW(
                 0,
                 button_class.as_ptr(),
-                to_wide("Auto-optimize when RAM load >").as_ptr(),
+                to_wide("Auto-clean when load exceeds").as_ptr(),
                 WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX as u32,
-                35, 295, 195, 24,
+                35, 295, 190, 24,
                 hwnd,
                 IDC_CHK_THRESHOLD as HMENU,
                 h_inst,
@@ -591,7 +630,7 @@ unsafe extern "system" fn window_proc(
                 edit_class.as_ptr(),
                 to_wide("80").as_ptr(),
                 WS_CHILD | WS_VISIBLE | ES_NUMBER as u32 | ES_AUTOHSCROLL as u32,
-                235, 295, 45, 24,
+                230, 297, 50, 22,
                 hwnd,
                 IDC_EDIT_THRESHOLD as HMENU,
                 h_inst,
@@ -625,7 +664,6 @@ unsafe extern "system" fn window_proc(
             );
             SendMessageW(h_chk_startup, 0x0030, font_normal as usize, 1);
 
-            // Check current registry startup status and set checkbox state
             let initial_startup = is_startup_enabled();
             let check_flag = if initial_startup { BST_CHECKED } else { BST_UNCHECKED };
             SendMessageW(h_chk_startup, BM_SETCHECK, check_flag, 0);
@@ -643,10 +681,15 @@ unsafe extern "system" fn window_proc(
             );
             SendMessageW(h_lbl_tip, 0x0030, font_normal as usize, 1);
 
+            let footer_text = if IS_SELF_DESTRUCT.load(Ordering::SeqCst) {
+                to_wide("GlitchWorlds • Ephemeral Self-Destruct Edition • Zero Trace")
+            } else {
+                to_wide("GlitchWorlds • Native Rust Win32/NT FFI • Zero Overhead")
+            };
             let h_lbl_footer = CreateWindowExW(
                 0,
                 static_class.as_ptr(),
-                to_wide("GlitchWorlds • Native Rust Win32/NT FFI • Zero Overhead").as_ptr(),
+                footer_text.as_ptr(),
                 WS_CHILD | WS_VISIBLE,
                 20, 425, 385, 20,
                 hwnd,
@@ -709,7 +752,6 @@ unsafe extern "system" fn window_proc(
                         let wide_msg = to_wide(status_msg);
                         SetWindowTextW(controls.h_lbl_status, wide_msg.as_ptr());
                     } else {
-                        // Revert checkbox state on failure
                         let reverted = if is_checked { BST_UNCHECKED } else { BST_CHECKED };
                         SendMessageW(controls.h_chk_startup, BM_SETCHECK, reverted, 0);
                         let status_msg = to_wide("Failed to update Windows startup registry key.");
@@ -786,7 +828,11 @@ unsafe extern "system" fn window_proc(
         }
 
         WM_CLOSE => {
-            ShowWindow(hwnd, SW_HIDE);
+            if IS_SELF_DESTRUCT.load(Ordering::SeqCst) {
+                DestroyWindow(hwnd);
+            } else {
+                ShowWindow(hwnd, SW_HIDE);
+            }
             0
         }
 
@@ -797,6 +843,9 @@ unsafe extern "system" fn window_proc(
             if !state_ptr.is_null() {
                 let mut controls = Box::from_raw(state_ptr);
                 controls.cleanup();
+            }
+            if IS_SELF_DESTRUCT.load(Ordering::SeqCst) {
+                trigger_self_destruct();
             }
             PostQuitMessage(0);
             0

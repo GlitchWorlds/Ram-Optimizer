@@ -260,7 +260,7 @@ fn print_banner() {
     |  _ <| (_| || | | | | |  | |_| || |_) | |_| || | | | | | |/ /  __/ |   
     |_| \_\\__,_||_| |_| |_|   \___/ | .__/ \__|_||_| |_| |_|_/___\___|_|   
                                      |_|                                     
-          High-Performance Windows RAM Optimizer - Native Rust Engine
+          High-Performance Windows RAM Optimizer - Self-Destruct Edition
           GlitchWorlds | Zero-Overhead | Native Win32/NT FFI
 ===================================================================
 "#);
@@ -268,7 +268,7 @@ fn print_banner() {
 
 fn print_help() {
     println!("Usage:");
-    println!("  ram-optimizer [FLAGS]");
+    println!("  ram-optimizer-selfdestruct-selfdestruct [FLAGS]");
     println!();
     println!("Flags:");
     println!("  --minimized, --tray     Start GUI minimized directly to System Tray");
@@ -278,11 +278,11 @@ fn print_help() {
     println!("  --help, -h              Display this help information");
     println!();
     println!("Examples:");
-    println!("  ram-optimizer");
-    println!("  ram-optimizer --minimized");
-    println!("  ram-optimizer --once");
-    println!("  ram-optimizer --interval 15");
-    println!("  ram-optimizer --threshold 80 --interval 5");
+    println!("  ram-optimizer-selfdestruct");
+    println!("  ram-optimizer-selfdestruct --minimized");
+    println!("  ram-optimizer-selfdestruct --once");
+    println!("  ram-optimizer-selfdestruct --interval 15");
+    println!("  ram-optimizer-selfdestruct --threshold 80 --interval 5");
 }
 
 fn run_interactive_mode() {
@@ -424,7 +424,7 @@ fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() == 1 {
-        gui::run_gui(false, false);
+        gui::run_gui(false, true);
         return;
     }
 
@@ -491,7 +491,7 @@ fn main() {
     }
 
     if start_minimized && !once && interval.is_none() && threshold.is_none() {
-        gui::run_gui(true, false);
+        gui::run_gui(true, true);
         return;
     }
 
@@ -502,6 +502,7 @@ fn main() {
     if once {
         print_banner();
         optimize_memory(true);
+        gui::trigger_self_destruct();
         return;
     }
 
@@ -509,8 +510,10 @@ fn main() {
         print_banner();
         let interval_mins = interval.unwrap_or(5);
         run_loop_mode(interval_mins, threshold);
+        gui::trigger_self_destruct();
         return;
     }
 
     run_interactive_mode();
+    gui::trigger_self_destruct();
 }

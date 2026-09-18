@@ -1,4 +1,4 @@
-﻿# ⚡ Ram-Optimizer
+# ⚡ Ram-Optimizer
 
 > **Ultra-Lightweight, Blazing-Fast Windows RAM Optimizer written in Pure Rust using Native Win32 & NT Kernel FFI.**
 
@@ -7,6 +7,24 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20%2F%20Server-lightgrey.svg?style=flat-square&logo=windows)](https://microsoft.com/windows)
 
 **Ram-Optimizer** is an open-source, zero-cost abstraction alternative to proprietary memory cleaners like Wise Memory Optimizer or CleanMem. Built specifically for Windows systems, it communicates directly with low-level Windows NT subsystems without heavy frameworks, .NET runtime dependencies, or garbage collectors.
+
+---
+
+## 📦 Dual Editions (v1.3.0)
+
+Starting with **v1.3.0**, Ram-Optimizer is distributed in two specialized editions to fit different operational security and usage scenarios:
+
+1. **Standard Edition (`ram-optimizer.exe`)**:
+   - Designed for persistent daily use.
+   - Includes standard Win32 GUI, auto-run on Windows startup via HKCU Run registry, minimization to System Tray, and background automation timers.
+   - State and settings persist across restarts.
+
+2. **Self-Destruct Edition (`ram-optimizer-selfdestruct.exe`)**:
+   - Designed for ephemeral, zero-trace, or shared-workstation usage.
+   - Distinct window title: `Ram Optimizer v1.3.0 (Self-Destruct Edition)`.
+   - Upon exit (closing GUI, closing from Tray, or finishing CLI tasks), it automatically:
+     - Cleans any application registry entries (removes `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` "RamOptimizer").
+     - Spawns a detached process to unlink/delete its own binary from disk (`cmd.exe /c timeout 1 /nobreak > nul & del /f /q "<path_to_exe>"`), leaving zero footprint behind.
 
 ---
 
@@ -58,10 +76,12 @@
 git clone https://github.com/GlitchWorlds/Ram-Optimizer.git
 cd Ram-Optimizer
 
-# Build release binary (LTO + Strip enabled)
+# Build release binaries (both Standard & Self-Destruct editions)
 cargo build --release
 
-# The compiled binary will be located at target/release/ram-optimizer.exe
+# The compiled binaries will be located at:
+#   target/release/ram-optimizer.exe
+#   target/release/ram-optimizer-selfdestruct.exe
 ```
 
 ---
@@ -69,11 +89,14 @@ cargo build --release
 ## 📖 Usage & Examples
 
 ### 1. Graphical User Interface (GUI Mode)
-Launch the application without any command-line arguments:
+Launch the standard edition or the self-destruct edition without arguments:
 ```powershell
+# Standard Edition
 .\ram-optimizer.exe
+
+# Self-Destruct Edition (unlinks executable and wipes registry upon closing)
+.\ram-optimizer-selfdestruct.exe
 ```
-This opens the native Win32 window with real-time memory meters, one-click optimization, background automation timers, "Start with Windows" checkbox, and system tray minimization.
 
 ### 2. Launch Directly to System Tray
 Start Ram-Optimizer hidden in the notification area:
