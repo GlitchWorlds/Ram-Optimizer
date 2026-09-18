@@ -268,7 +268,7 @@ fn print_banner() {
 
 fn print_help() {
     println!("Usage:");
-    println!("  ram-optimizer-selfdestruct-selfdestruct [FLAGS]");
+    println!("  ram-optimizer-selfdestruct [FLAGS]");
     println!();
     println!("Flags:");
     println!("  --minimized, --tray     Start GUI minimized directly to System Tray");

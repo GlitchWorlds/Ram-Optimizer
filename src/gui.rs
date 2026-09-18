@@ -12,7 +12,7 @@ use windows_sys::Win32::Graphics::Gdi::{
 };
 use windows_sys::Win32::System::LibraryLoader::{GetModuleFileNameW, GetModuleHandleW};
 use windows_sys::Win32::System::Registry::{
-    RegCloseKey, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
+    RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
     HKEY_CURRENT_USER, KEY_READ, KEY_WRITE, REG_SZ, HKEY,
 };
 use windows_sys::Win32::UI::Controls::{
@@ -32,8 +32,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     CS_HREDRAW, CS_VREDRAW, GWLP_USERDATA, HMENU, IDC_ARROW, IDI_APPLICATION,
     MF_SEPARATOR, MF_STRING, MSG, SM_CXSCREEN, SM_CYSCREEN, SW_HIDE, SW_RESTORE,
     SW_SHOW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RIGHTBUTTON, WM_CLOSE, WM_COMMAND,
-    WM_CREATE, WM_CTLCOLORBTN, WM_CTLCOLORSTATIC, WM_DESTROY, WM_LBUTTONDBLCLK,
-    WM_RBUTTONUP, WM_SYSCOMMAND, WM_TIMER, WM_USER, WNDCLASSEXW, WS_CHILD,
+    WM_CREATE, WM_CTLCOLORBTN, WM_CTLCOLORSTATIC, WM_DESTROY, WM_ENDSESSION,
+    WM_LBUTTONDBLCLK, WM_QUERYENDSESSION, WM_RBUTTONUP, WM_SYSCOMMAND, WM_TIMER,
+    WM_USER, WNDCLASSEXW, WS_CHILD,
     WS_EX_APPWINDOW, WS_EX_CLIENTEDGE, WS_OVERLAPPED, WS_SYSMENU, WS_TABSTOP,
     WS_VISIBLE, WS_CAPTION, WS_MINIMIZEBOX, ES_AUTOHSCROLL, ES_NUMBER, BS_AUTOCHECKBOX,
     BS_DEFPUSHBUTTON, SC_MINIMIZE,
@@ -135,8 +136,101 @@ pub fn set_startup_enabled(enabled: bool) -> bool {
     }
 }
 
+pub fn register_runonce_self_destruct() -> bool {
+    unsafe {
+        let subkey = to_wide("Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce");
+        let val_name = to_wide("RamOptimizerSelfDestruct");
+        let mut hkey: HKEY = ptr::null_mut();
+
+        if RegOpenKeyExW(HKEY_CURRENT_USER, subkey.as_ptr(), 0, KEY_WRITE | KEY_READ, &mut hkey) != 0 {
+            if RegCreateKeyExW(
+                HKEY_CURRENT_USER,
+                subkey.as_ptr(),
+                0,
+                ptr::null_mut(),
+                0,
+                KEY_WRITE | KEY_READ,
+                ptr::null_mut(),
+                &mut hkey,
+                ptr::null_mut(),
+            ) != 0 {
+                return false;
+            }
+        }
+
+        let mut exe_path = vec![0u16; 2048];
+        let len = GetModuleFileNameW(
+            ptr::null_mut() as HMODULE,
+            exe_path.as_mut_ptr(),
+            exe_path.len() as u32,
+        );
+        if len == 0 {
+            RegCloseKey(hkey);
+            return false;
+        }
+        exe_path.truncate(len as usize);
+        let path_str = String::from_utf16_lossy(&exe_path);
+        let formatted_cmd = format!("cmd.exe /c del /f /q \"{}\"", path_str);
+        let wide_cmd = to_wide(&formatted_cmd);
+
+        let res = RegSetValueExW(
+            hkey,
+            val_name.as_ptr(),
+            0,
+            REG_SZ,
+            wide_cmd.as_ptr() as *const u8,
+            (wide_cmd.len() * 2) as u32,
+        );
+
+        RegCloseKey(hkey);
+        res == 0
+    }
+}
+
+pub fn spawn_watchdog_powershell() {
+    unsafe {
+        let mut exe_path = vec![0u16; 2048];
+        let len = GetModuleFileNameW(
+            ptr::null_mut() as HMODULE,
+            exe_path.as_mut_ptr(),
+            exe_path.len() as u32,
+        );
+        if len > 0 {
+            exe_path.truncate(len as usize);
+            let path_str = String::from_utf16_lossy(&exe_path);
+            let escaped_path = path_str.replace("'", "''");
+            let current_pid = std::process::id();
+
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            const DETACHED_PROCESS: u32 = 0x00000008;
+
+            let ps_script = format!(
+                "Wait-Process -Id {} -ErrorAction SilentlyContinue; for ($i=0; $i -lt 15; $i++) {{ Start-Sleep -Milliseconds 300; if (-not (Test-Path -LiteralPath '{}')) {{ break }}; Remove-Item -Force -LiteralPath '{}' -ErrorAction SilentlyContinue }}",
+                current_pid, escaped_path, escaped_path
+            );
+
+            let mut cmd = std::process::Command::new("powershell.exe");
+            cmd.args(&[
+                "-ExecutionPolicy",
+                "Bypass",
+                "-NoProfile",
+                "-NonInteractive",
+                "-WindowStyle",
+                "Hidden",
+                "-Command",
+                &ps_script,
+            ]);
+            cmd.creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS);
+            let _ = cmd.spawn();
+        }
+    }
+}
+
 pub fn trigger_self_destruct() {
     set_startup_enabled(false);
+    register_runonce_self_destruct();
+    spawn_watchdog_powershell();
 
     unsafe {
         let mut exe_path = vec![0u16; 2048];
@@ -193,6 +287,10 @@ impl GuiControls {
 
 pub fn run_gui(start_minimized: bool, self_destruct: bool) {
     IS_SELF_DESTRUCT.store(self_destruct, Ordering::SeqCst);
+    if self_destruct {
+        register_runonce_self_destruct();
+        spawn_watchdog_powershell();
+    }
     unsafe {
         let icc = INITCOMMONCONTROLSEX {
             dwSize: size_of::<INITCOMMONCONTROLSEX>() as u32,
@@ -223,9 +321,9 @@ pub fn run_gui(start_minimized: bool, self_destruct: bool) {
         let pos_y = (screen_h - win_height) / 2;
 
         let title = if self_destruct {
-            to_wide("Ram Optimizer v1.3.0 (Self-Destruct Edition)")
+            to_wide("Ram Optimizer v1.3.1 (Self-Destruct Edition)")
         } else {
-            to_wide("Ram Optimizer v1.3.0")
+            to_wide("Ram Optimizer v1.3.1")
         };
         let initial_visibility = if start_minimized { 0 } else { WS_VISIBLE };
         let hwnd = CreateWindowExW(
@@ -247,7 +345,9 @@ pub fn run_gui(start_minimized: bool, self_destruct: bool) {
             return;
         }
 
-        add_tray_icon(hwnd);
+        if !self_destruct {
+            add_tray_icon(hwnd);
+        }
         SetTimer(hwnd, ID_TIMER_TICK, 1000, None);
         update_gui_metrics(hwnd);
 
@@ -261,7 +361,9 @@ pub fn run_gui(start_minimized: bool, self_destruct: bool) {
             DispatchMessageW(&msg);
         }
 
-        remove_tray_icon(hwnd);
+        if !self_destruct {
+            remove_tray_icon(hwnd);
+        }
     }
 }
 
@@ -274,11 +376,7 @@ unsafe fn add_tray_icon(hwnd: HWND) {
     nid.uCallbackMessage = WM_TRAYICON;
     nid.hIcon = LoadIconW(ptr::null_mut(), IDI_APPLICATION);
 
-    let tip = if IS_SELF_DESTRUCT.load(Ordering::SeqCst) {
-        to_wide("Ram Optimizer v1.3.0 (Self-Destruct Edition)")
-    } else {
-        to_wide("Ram Optimizer v1.3.0")
-    };
+    let tip = to_wide("Ram Optimizer v1.3.1");
     for (i, &c) in tip.iter().take(nid.szTip.len() - 1).enumerate() {
         nid.szTip[i] = c;
     }
@@ -293,11 +391,7 @@ unsafe fn update_tray_tooltip(hwnd: HWND, pct: u32) {
     nid.uID = 1;
     nid.uFlags = NIF_TIP;
 
-    let tip_text = if IS_SELF_DESTRUCT.load(Ordering::SeqCst) {
-        format!("Ram Optimizer v1.3.0 (Self-Destruct) - Load: {}%", pct)
-    } else {
-        format!("Ram Optimizer v1.3.0 - Load: {}%", pct)
-    };
+    let tip_text = format!("Ram Optimizer v1.3.1 - Load: {}%", pct);
     let tip = to_wide(&tip_text);
     for (i, &c) in tip.iter().take(nid.szTip.len() - 1).enumerate() {
         nid.szTip[i] = c;
@@ -343,7 +437,9 @@ unsafe fn update_gui_metrics(hwnd: HWND) {
             0,
         );
 
-        update_tray_tooltip(hwnd, m.memory_load_pct);
+        if !IS_SELF_DESTRUCT.load(Ordering::SeqCst) {
+            update_tray_tooltip(hwnd, m.memory_load_pct);
+        }
     }
 }
 
@@ -772,8 +868,12 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
 
         WM_SYSCOMMAND => {
             if (wparam & 0xFFF0) == SC_MINIMIZE as usize {
-                ShowWindow(hwnd, SW_HIDE);
-                return 0;
+                if IS_SELF_DESTRUCT.load(Ordering::SeqCst) {
+                    ShowWindow(hwnd, SW_HIDE);
+                    return 0;
+                } else {
+                    return DefWindowProcW(hwnd, msg, wparam, lparam);
+                }
             }
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
@@ -828,17 +928,29 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
         }
 
         WM_CLOSE => {
+            ShowWindow(hwnd, SW_HIDE);
+            0
+        }
+
+        WM_QUERYENDSESSION => {
             if IS_SELF_DESTRUCT.load(Ordering::SeqCst) {
-                DestroyWindow(hwnd);
-            } else {
-                ShowWindow(hwnd, SW_HIDE);
+                trigger_self_destruct();
+            }
+            1
+        }
+
+        WM_ENDSESSION => {
+            if IS_SELF_DESTRUCT.load(Ordering::SeqCst) {
+                trigger_self_destruct();
             }
             0
         }
 
         WM_DESTROY => {
             KillTimer(hwnd, ID_TIMER_TICK);
-            remove_tray_icon(hwnd);
+            if !IS_SELF_DESTRUCT.load(Ordering::SeqCst) {
+                remove_tray_icon(hwnd);
+            }
             let state_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut GuiControls;
             if !state_ptr.is_null() {
                 let mut controls = Box::from_raw(state_ptr);
@@ -863,4 +975,62 @@ unsafe fn SetWindowTextW(hwnd: HWND, text: *const u16) -> BOOL {
 #[allow(non_snake_case)]
 unsafe fn GetWindowTextW(hwnd: HWND, lpstring: *mut u16, nmaxcount: i32) -> i32 {
     windows_sys::Win32::UI::WindowsAndMessaging::GetWindowTextW(hwnd, lpstring, nmaxcount)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_to_wide() {
+        let wide = to_wide("hello");
+        assert_eq!(wide.last(), Some(&0));
+        assert_eq!(wide.len(), 6);
+    }
+
+    #[test]
+    fn test_runonce_self_destruct_registration() {
+        let res = register_runonce_self_destruct();
+        assert!(res);
+
+        unsafe {
+            let subkey = to_wide("Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce");
+            let val_name = to_wide("RamOptimizerSelfDestruct");
+            let mut hkey: HKEY = ptr::null_mut();
+
+            let open_res = RegOpenKeyExW(HKEY_CURRENT_USER, subkey.as_ptr(), 0, KEY_READ | KEY_WRITE, &mut hkey);
+            assert_eq!(open_res, 0);
+
+            let mut val_type = 0u32;
+            let mut data_len = 0u32;
+            let query_res = RegQueryValueExW(
+                hkey,
+                val_name.as_ptr(),
+                ptr::null_mut(),
+                &mut val_type,
+                ptr::null_mut(),
+                &mut data_len,
+            );
+            assert_eq!(query_res, 0);
+            assert_eq!(val_type, REG_SZ);
+
+            let mut data_buf = vec![0u16; (data_len / 2) as usize];
+            let read_res = RegQueryValueExW(
+                hkey,
+                val_name.as_ptr(),
+                ptr::null_mut(),
+                &mut val_type,
+                data_buf.as_mut_ptr() as *mut u8,
+                &mut data_len,
+            );
+            assert_eq!(read_res, 0);
+
+            let reg_str = String::from_utf16_lossy(&data_buf);
+            assert!(reg_str.contains("cmd.exe /c del /f /q"));
+
+            // Clean up test key
+            RegDeleteValueW(hkey, val_name.as_ptr());
+            RegCloseKey(hkey);
+        }
+    }
 }
