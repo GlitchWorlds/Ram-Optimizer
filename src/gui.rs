@@ -41,6 +41,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::{get_ram_metrics, optimize_memory};
+use crate::config::{self, Config};
 
 const ID_TIMER_TICK: usize = 1001;
 const WM_TRAYICON: u32 = WM_USER + 201;
@@ -65,8 +66,63 @@ static IS_OPTIMIZING: AtomicBool = AtomicBool::new(false);
 static LAST_OPTIMIZE_SEC: AtomicU64 = AtomicU64::new(0);
 static IS_SELF_DESTRUCT: AtomicBool = AtomicBool::new(false);
 
+/// Guards config saves: true once WM_CREATE has finished seeding the controls
+/// from disk, so the EN_CHANGE notifications fired while setting edit text
+/// during init do not write the config back prematurely.
+static UI_READY: AtomicBool = AtomicBool::new(false);
+
 fn to_wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
+}
+
+/// Loads persisted automation settings (falls back to defaults on failure).
+fn load_config() -> Config {
+    config::load()
+}
+
+/// Persists automation settings; failures are deliberately ignored so a
+/// read-only profile never disrupts the GUI.
+fn save_config(cfg: &Config) {
+    let _ = config::save(cfg);
+}
+
+/// Snapshots the current UI automation controls and writes them to disk.
+/// Must be called on user changes (checkbox toggles, interval/threshold edits).
+unsafe fn save_current_ui_config(hwnd: HWND) {
+    let state_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut GuiControls;
+    if state_ptr.is_null() {
+        return;
+    }
+    let controls = &*state_ptr;
+
+    let auto_clean =
+        SendMessageW(controls.h_chk_interval, BM_GETCHECK, 0, 0) as usize == BST_CHECKED;
+
+    let mut interval = 15u32;
+    let mut buf = [0u16; 32];
+    GetWindowTextW(controls.h_edit_interval, buf.as_mut_ptr(), 32);
+    let text = String::from_utf16_lossy(&buf);
+    if let Ok(n) = text.trim_matches(char::from(0)).trim().parse::<u32>() {
+        if n > 0 {
+            interval = n;
+        }
+    }
+
+    let mut threshold = 80u32;
+    let mut buf2 = [0u16; 32];
+    GetWindowTextW(controls.h_edit_threshold, buf2.as_mut_ptr(), 32);
+    let text2 = String::from_utf16_lossy(&buf2);
+    if let Ok(n) = text2.trim_matches(char::from(0)).trim().parse::<u32>() {
+        if n > 0 && n <= 100 {
+            threshold = n;
+        }
+    }
+
+    save_config(&Config {
+        auto_clean,
+        interval_minutes: interval,
+        threshold_percent: threshold,
+    });
 }
 
 pub fn is_startup_enabled() -> bool {
@@ -321,9 +377,9 @@ pub fn run_gui(start_minimized: bool, self_destruct: bool) {
         let pos_y = (screen_h - win_height) / 2;
 
         let title = if self_destruct {
-            to_wide("Ram Optimizer v1.3.1 (Self-Destruct Edition)")
+            to_wide("Ram Optimizer v1.3.2 (Self-Destruct Edition)")
         } else {
-            to_wide("Ram Optimizer v1.3.1")
+            to_wide("Ram Optimizer v1.3.2")
         };
         let initial_visibility = if start_minimized { 0 } else { WS_VISIBLE };
         let hwnd = CreateWindowExW(
@@ -376,7 +432,7 @@ unsafe fn add_tray_icon(hwnd: HWND) {
     nid.uCallbackMessage = WM_TRAYICON;
     nid.hIcon = LoadIconW(ptr::null_mut(), IDI_APPLICATION);
 
-    let tip = to_wide("Ram Optimizer v1.3.1");
+    let tip = to_wide("Ram Optimizer v1.3.2");
     for (i, &c) in tip.iter().take(nid.szTip.len() - 1).enumerate() {
         nid.szTip[i] = c;
     }
@@ -391,7 +447,7 @@ unsafe fn update_tray_tooltip(hwnd: HWND, pct: u32) {
     nid.uID = 1;
     nid.uFlags = NIF_TIP;
 
-    let tip_text = format!("Ram Optimizer v1.3.1 - Load: {}%", pct);
+    let tip_text = format!("Ram Optimizer v1.3.2 - Load: {}%", pct);
     let tip = to_wide(&tip_text);
     for (i, &c) in tip.iter().take(nid.szTip.len() - 1).enumerate() {
         nid.szTip[i] = c;
@@ -764,6 +820,25 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
             let check_flag = if initial_startup { BST_CHECKED } else { BST_UNCHECKED };
             SendMessageW(h_chk_startup, BM_SETCHECK, check_flag, 0);
 
+            // Seed automation controls from persisted config (if any). The
+            // auto-clean checkbox defaults to unchecked; if the user previously
+            // enabled it, restore it and arm the last-run timestamp so the
+            // 1s timer resumes the schedule immediately after a restart.
+            let persisted = load_config();
+            SendMessageW(h_chk_interval, BM_SETCHECK, if persisted.auto_clean { BST_CHECKED } else { BST_UNCHECKED }, 0);
+            let interval_text = to_wide(&format!("{}", persisted.interval_minutes));
+            SetWindowTextW(h_edit_interval, interval_text.as_ptr());
+            let threshold_text = to_wide(&format!("{}", persisted.threshold_percent));
+            SetWindowTextW(h_edit_threshold, threshold_text.as_ptr());
+            if persisted.auto_clean && LAST_OPTIMIZE_SEC.load(Ordering::SeqCst) == 0 {
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                LAST_OPTIMIZE_SEC.store(now, Ordering::SeqCst);
+            }
+            UI_READY.store(true, Ordering::SeqCst);
+
             let h_lbl_tip = CreateWindowExW(
                 0,
                 static_class.as_ptr(),
@@ -853,6 +928,17 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
                         let status_msg = to_wide("Failed to update Windows startup registry key.");
                         SetWindowTextW(controls.h_lbl_status, status_msg.as_ptr());
                     }
+                }
+            } else if id == IDC_CHK_INTERVAL || id == IDC_CHK_THRESHOLD {
+                // Persist the automation settings whenever the user toggles
+                // either auto-clean checkbox. The guard skips saves while the
+                // controls are still being seeded during WM_CREATE.
+                if UI_READY.load(Ordering::SeqCst) {
+                    save_current_ui_config(hwnd);
+                }
+            } else if id == IDC_EDIT_INTERVAL || id == IDC_EDIT_THRESHOLD {
+                if UI_READY.load(Ordering::SeqCst) {
+                    save_current_ui_config(hwnd);
                 }
             }
             0

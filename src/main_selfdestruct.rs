@@ -1,5 +1,6 @@
 #![windows_subsystem = "windows"]
 
+mod config;
 mod gui;
 use std::env;
 use std::io::{self, Write};
