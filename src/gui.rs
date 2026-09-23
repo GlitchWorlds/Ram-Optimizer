@@ -377,9 +377,9 @@ pub fn run_gui(start_minimized: bool, self_destruct: bool) {
         let pos_y = (screen_h - win_height) / 2;
 
         let title = if self_destruct {
-            to_wide("Ram Optimizer v1.3.2 (Self-Destruct Edition)")
+            to_wide("Ram Optimizer v1.3.3 (Self-Destruct Edition)")
         } else {
-            to_wide("Ram Optimizer v1.3.2")
+            to_wide("Ram Optimizer v1.3.3")
         };
         let initial_visibility = if start_minimized { 0 } else { WS_VISIBLE };
         let hwnd = CreateWindowExW(
@@ -432,7 +432,7 @@ unsafe fn add_tray_icon(hwnd: HWND) {
     nid.uCallbackMessage = WM_TRAYICON;
     nid.hIcon = LoadIconW(ptr::null_mut(), IDI_APPLICATION);
 
-    let tip = to_wide("Ram Optimizer v1.3.2");
+    let tip = to_wide("Ram Optimizer v1.3.3");
     for (i, &c) in tip.iter().take(nid.szTip.len() - 1).enumerate() {
         nid.szTip[i] = c;
     }
@@ -447,7 +447,7 @@ unsafe fn update_tray_tooltip(hwnd: HWND, pct: u32) {
     nid.uID = 1;
     nid.uFlags = NIF_TIP;
 
-    let tip_text = format!("Ram Optimizer v1.3.2 - Load: {}%", pct);
+    let tip_text = format!("Ram Optimizer v1.3.3 - Load: {}%", pct);
     let tip = to_wide(&tip_text);
     for (i, &c) in tip.iter().take(nid.szTip.len() - 1).enumerate() {
         nid.szTip[i] = c;
@@ -842,7 +842,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
             let h_lbl_tip = CreateWindowExW(
                 0,
                 static_class.as_ptr(),
-                to_wide("Tip: Minimizing window hides it to System Tray.").as_ptr(),
+                to_wide("Tip: Minimize sends the app to System Tray. Close exits the app.").as_ptr(),
                 WS_CHILD | WS_VISIBLE,
                 35, 375, 350, 20,
                 hwnd,
@@ -954,12 +954,8 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
 
         WM_SYSCOMMAND => {
             if (wparam & 0xFFF0) == SC_MINIMIZE as usize {
-                if IS_SELF_DESTRUCT.load(Ordering::SeqCst) {
-                    ShowWindow(hwnd, SW_HIDE);
-                    return 0;
-                } else {
-                    return DefWindowProcW(hwnd, msg, wparam, lparam);
-                }
+                ShowWindow(hwnd, SW_HIDE);
+                return 0;
             }
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
@@ -1014,7 +1010,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
         }
 
         WM_CLOSE => {
-            ShowWindow(hwnd, SW_HIDE);
+            DestroyWindow(hwnd);
             0
         }
 

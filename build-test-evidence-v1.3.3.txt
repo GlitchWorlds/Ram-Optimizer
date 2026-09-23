@@ -1,0 +1,10 @@
+=== BUILD ===
+    Finished `release` profile [optimized] target(s) in 0.11s
+=== TEST ===
+running 6 tests
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+running 6 tests
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+=== ARTIFACTS ===
+-rwxr-xr-x 2 bobby 197121 352768 Sep 23 18:41 target/release/ram-optimizer.exe
+-rwxr-xr-x 2 bobby 197121 415232 Sep 23 18:41 target/release/ram-optimizer-selfdestruct.exe
