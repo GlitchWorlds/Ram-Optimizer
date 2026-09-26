@@ -1,6 +1,6 @@
 [package]
 name = "ram-optimizer"
-version = "1.3.3"
+version = "1.3.4"
 edition = "2021"
 authors = ["GlitchWorlds"]
 description = "High-performance ultra-lightweight Windows RAM Optimizer written in native Rust with Win32/NT FFI"

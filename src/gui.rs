@@ -26,14 +26,14 @@ use windows_sys::Win32::UI::Shell::{
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
     DestroyWindow, DispatchMessageW, GetCursorPos, GetMessageW, GetSystemMetrics,
-    GetWindowLongPtrW, KillTimer, LoadCursorW, LoadIconW, PostQuitMessage,
+    GetWindowLongPtrW, KillTimer, LoadCursorW, LoadIconW, PostMessageW, PostQuitMessage,
     RegisterClassExW, SendMessageW, SetForegroundWindow, SetTimer, SetWindowLongPtrW,
     ShowWindow, TrackPopupMenu, TranslateMessage, BM_GETCHECK, BM_SETCHECK,
     CS_HREDRAW, CS_VREDRAW, GWLP_USERDATA, HMENU, IDC_ARROW, IDI_APPLICATION,
     MF_SEPARATOR, MF_STRING, MSG, SM_CXSCREEN, SM_CYSCREEN, SW_HIDE, SW_RESTORE,
-    SW_SHOW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_RIGHTBUTTON, WM_CLOSE, WM_COMMAND,
+    SW_SHOW, TPM_BOTTOMALIGN, TPM_LEFTALIGN, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_CLOSE, WM_COMMAND,
     WM_CREATE, WM_CTLCOLORBTN, WM_CTLCOLORSTATIC, WM_DESTROY, WM_ENDSESSION,
-    WM_LBUTTONDBLCLK, WM_QUERYENDSESSION, WM_RBUTTONUP, WM_SYSCOMMAND, WM_TIMER,
+    WM_LBUTTONDBLCLK, WM_NULL, WM_QUERYENDSESSION, WM_RBUTTONUP, WM_SYSCOMMAND, WM_TIMER,
     WM_USER, WNDCLASSEXW, WS_CHILD,
     WS_EX_APPWINDOW, WS_EX_CLIENTEDGE, WS_OVERLAPPED, WS_SYSMENU, WS_TABSTOP,
     WS_VISIBLE, WS_CAPTION, WS_MINIMIZEBOX, ES_AUTOHSCROLL, ES_NUMBER, BS_AUTOCHECKBOX,
@@ -985,7 +985,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
                     SetForegroundWindow(hwnd);
                     let cmd = TrackPopupMenu(
                         h_menu,
-                        TPM_RIGHTBUTTON | TPM_LEFTALIGN | TPM_BOTTOMALIGN,
+                        TPM_RIGHTBUTTON | TPM_LEFTALIGN | TPM_BOTTOMALIGN | TPM_RETURNCMD | TPM_NONOTIFY,
                         pt.x,
                         pt.y,
                         0,
@@ -993,6 +993,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
                         ptr::null_mut(),
                     );
                     DestroyMenu(h_menu);
+                    PostMessageW(hwnd, WM_NULL, 0, 0);
 
                     if cmd == IDM_TRAY_OPEN as i32 {
                         ShowWindow(hwnd, SW_SHOW);
