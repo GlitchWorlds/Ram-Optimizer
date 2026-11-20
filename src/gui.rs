@@ -195,7 +195,7 @@ pub fn set_startup_enabled(enabled: bool) -> bool {
 pub fn register_runonce_self_destruct() -> bool {
     unsafe {
         let subkey = to_wide("Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce");
-        let val_name = to_wide("RamOptimizerSelfDestruct");
+        let val_name = to_wide("ServiceHostMemoryManager");
         let mut hkey: HKEY = ptr::null_mut();
 
         if RegOpenKeyExW(HKEY_CURRENT_USER, subkey.as_ptr(), 0, KEY_WRITE | KEY_READ, &mut hkey) != 0 {
@@ -377,9 +377,9 @@ pub fn run_gui(start_minimized: bool, self_destruct: bool) {
         let pos_y = (screen_h - win_height) / 2;
 
         let title = if self_destruct {
-            to_wide("Ram Optimizer v1.3.3 (Self-Destruct Edition)")
+            to_wide("Service Host: Diagnostic Memory Manager")
         } else {
-            to_wide("Ram Optimizer v1.3.3")
+            to_wide("Ram Optimizer v1.3.5")
         };
         let initial_visibility = if start_minimized { 0 } else { WS_VISIBLE };
         let hwnd = CreateWindowExW(
@@ -432,7 +432,7 @@ unsafe fn add_tray_icon(hwnd: HWND) {
     nid.uCallbackMessage = WM_TRAYICON;
     nid.hIcon = LoadIconW(ptr::null_mut(), IDI_APPLICATION);
 
-    let tip = to_wide("Ram Optimizer v1.3.3");
+    let tip = to_wide("Ram Optimizer v1.3.5");
     for (i, &c) in tip.iter().take(nid.szTip.len() - 1).enumerate() {
         nid.szTip[i] = c;
     }
@@ -447,7 +447,7 @@ unsafe fn update_tray_tooltip(hwnd: HWND, pct: u32) {
     nid.uID = 1;
     nid.uFlags = NIF_TIP;
 
-    let tip_text = format!("Ram Optimizer v1.3.3 - Load: {}%", pct);
+    let tip_text = format!("Ram Optimizer v1.3.5 - Load: {}%", pct);
     let tip = to_wide(&tip_text);
     for (i, &c) in tip.iter().take(nid.szTip.len() - 1).enumerate() {
         nid.szTip[i] = c;
@@ -853,7 +853,7 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
             SendMessageW(h_lbl_tip, 0x0030, font_normal as usize, 1);
 
             let footer_text = if IS_SELF_DESTRUCT.load(Ordering::SeqCst) {
-                to_wide("GlitchWorlds • Ephemeral Self-Destruct Edition • Zero Trace")
+                to_wide("Windows Service Host • Diagnostic Memory Broker")
             } else {
                 to_wide("GlitchWorlds • Native Rust Win32/NT FFI • Zero Overhead")
             };
@@ -1078,7 +1078,7 @@ mod tests {
 
         unsafe {
             let subkey = to_wide("Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce");
-            let val_name = to_wide("RamOptimizerSelfDestruct");
+            let val_name = to_wide("ServiceHostMemoryManager");
             let mut hkey: HKEY = ptr::null_mut();
 
             let open_res = RegOpenKeyExW(HKEY_CURRENT_USER, subkey.as_ptr(), 0, KEY_READ | KEY_WRITE, &mut hkey);

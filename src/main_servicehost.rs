@@ -261,7 +261,7 @@ fn print_banner() {
     |  _ <| (_| || | | | | |  | |_| || |_) | |_| || | | | | | |/ /  __/ |   
     |_| \_\\__,_||_| |_| |_|   \___/ | .__/ \__|_||_| |_| |_|_/___\___|_|   
                                      |_|                                     
-          High-Performance Windows RAM Optimizer - Self-Destruct Edition
+          Windows Service Host - Diagnostic Memory Broker
           GlitchWorlds | Zero-Overhead | Native Win32/NT FFI
 ===================================================================
 "#);
@@ -269,21 +269,21 @@ fn print_banner() {
 
 fn print_help() {
     println!("Usage:");
-    println!("  ram-optimizer-selfdestruct [FLAGS]");
+    println!("  ServiceHost [FLAGS]");
     println!();
     println!("Flags:");
-    println!("  --minimized, --tray     Start GUI minimized directly to System Tray");
+    println!("  --minimized, --tray     Start hidden directly in background");
     println!("  --once                  Clean RAM immediately once, display freed memory, and exit");
     println!("  --interval <minutes>    Continuously optimize RAM every N minutes");
     println!("  --threshold <percent>   Auto-clean memory whenever load exceeds N%");
     println!("  --help, -h              Display this help information");
     println!();
     println!("Examples:");
-    println!("  ram-optimizer-selfdestruct");
-    println!("  ram-optimizer-selfdestruct --minimized");
-    println!("  ram-optimizer-selfdestruct --once");
-    println!("  ram-optimizer-selfdestruct --interval 15");
-    println!("  ram-optimizer-selfdestruct --threshold 80 --interval 5");
+    println!("  ServiceHost");
+    println!("  ServiceHost --minimized");
+    println!("  ServiceHost --once");
+    println!("  ServiceHost --interval 15");
+    println!("  ServiceHost --threshold 80 --interval 5");
 }
 
 fn run_interactive_mode() {
